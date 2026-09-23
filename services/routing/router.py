@@ -1,8 +1,12 @@
 from typing import Any
 
+import structlog
+
 from providers.base import LLMProvider, ProviderResult
 from services.routing.classifier import RequestClassifier
 from services.routing.rules import RoutingRuleEngine
+
+logger = structlog.get_logger("llm_gateway.router")
 
 
 class ModelRouter:
@@ -43,6 +47,13 @@ class ModelRouter:
                 )
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
+                logger.warning(
+                    "provider_failed_trying_fallback",
+                    provider=name,
+                    model=providers[name].model_name,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
         raise RuntimeError("All providers failed: " + "; ".join(errors))
 
     def streaming_provider(self, prompt: str, messages: list[Any]) -> LLMProvider:

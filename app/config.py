@@ -28,11 +28,11 @@ class Settings(BaseSettings):
     tournament_providers: str = "local-concise,local-analytical,local-practical"
     judge_provider: str = "local-judge"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.6-flash"
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-20b"
     cerebras_api_key: str = ""
-    cerebras_model: str = "llama-3.3-70b"
+    cerebras_model: str = "qwen-3.8-27b"
 
     @property
     def enabled_provider_names(self) -> List[str]:

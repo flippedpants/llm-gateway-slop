@@ -17,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.logging_config import configure_logging
-from app.middleware import GatewaySecurityMiddleware, RequestContextMiddleware, error_response
+from app.middleware import (
+    GatewaySecurityMiddleware,
+    RequestContextMiddleware,
+    error_response,
+)
 from app.schemas import (
     APIKeyCreateRequest,
     CandidateTrace,
@@ -38,7 +42,7 @@ from database.connection import (
     get_db,
     initialize_database,
 )
-from database.models import GatewayAPIKey, RequestLog
+from database.models import GatewayAPIKey, RequestLog, SemanticCacheEntry
 from services.api_key_service import (
     create_gateway_api_key,
     seed_gateway_api_key,
@@ -349,6 +353,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "cache_hit": lookup.hit,
                         "similarity": lookup.similarity,
                         "llm_called": not lookup.hit,
+                        "llm_call_count": 0 if lookup.hit else 1,
                         "streaming": True,
                         "original_tokens": stats.original_tokens,
                         "compressed_tokens": stats.compressed_tokens,
@@ -414,6 +419,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "cache_hit": lookup.hit,
             "similarity": lookup.similarity,
             "llm_called": llm_called,
+            "llm_call_count": 1 if llm_called else 0,
             "streaming": False,
             "original_tokens": stats.original_tokens,
             "compressed_tokens": stats.compressed_tokens,
@@ -487,7 +493,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "provider": outcome.judge_provider,
             "model": outcome.judge_model,
             "llm_called": True,
+            "llm_call_count": len(outcome.candidates) + 1,
             "tournament": True,
+            "tournament_candidate_count": len(outcome.candidates),
+            "tournament_winner_score": outcome.scores.get(outcome.winner_id),
+            "judge_fallback": outcome.fallback_used,
             "original_tokens": stats.original_tokens,
             "compressed_tokens": stats.compressed_tokens,
             "input_tokens": outcome.usage.prompt_tokens,
@@ -565,29 +575,105 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await redis.delete(key)
         return {"cache_entries_cleared": cleared, "rate_limits_reset": True}
 
+    @app.get("/v1/admin/config", dependencies=[Depends(require_admin)])
+    async def runtime_config():
+        return {
+            "cache_similarity_threshold": settings.cache_similarity_threshold,
+            "embedding_model": settings.embedding_model,
+            "embedding_dimensions": settings.embedding_dimensions,
+            "compression_min_tokens": settings.compression_min_tokens,
+            "compression_target_ratio": settings.compression_target_ratio,
+            "enabled_providers": settings.enabled_provider_names,
+            "tournament_providers": settings.tournament_provider_names,
+            "judge_provider": settings.judge_provider,
+        }
+
     @app.get("/usage", dependencies=[Depends(require_admin)])
     async def usage(db: AsyncSession = Depends(get_db)):
-        total = int(await db.scalar(select(func.count(RequestLog.id))) or 0)
-        hits = int(
-            await db.scalar(select(func.count(RequestLog.id)).where(RequestLog.cache_hit.is_(True))) or 0
+        """Return bounded, prompt-free telemetry shaped for the local portal."""
+        logs = list(
+            (
+                await db.scalars(
+                    select(RequestLog).order_by(RequestLog.created_at.desc()).limit(5000)
+                )
+            ).all()
         )
-        rate_limited = int(
-            await db.scalar(select(func.count(RequestLog.id)).where(RequestLog.rate_limited.is_(True))) or 0
+        chat = [
+            row
+            for row in logs
+            if row.path == "/v1/chat/completions" and row.status_code == 200
+        ]
+        hits = sum(1 for row in chat if row.cache_hit)
+        misses = len(chat) - hits
+        forwarded = [row for row in logs if row.llm_called]
+        total_original = sum(row.original_tokens or 0 for row in forwarded)
+        total_compressed = sum(row.compressed_tokens or 0 for row in forwarded)
+        tokens_saved = sum(
+            max((row.original_tokens or 0) - (row.compressed_tokens or 0), 0)
+            for row in forwarded
         )
-        avg_latency = await db.scalar(select(func.avg(RequestLog.latency_ms)))
-        saved = int(
-            await db.scalar(
-                select(func.coalesce(func.sum(RequestLog.original_tokens - RequestLog.compressed_tokens), 0))
-            )
-            or 0
-        )
+        tournaments = [row for row in logs if row.tournament and row.status_code == 200]
+        candidate_counts = [row.tournament_candidate_count for row in tournaments if row.tournament_candidate_count is not None]
+        winner_scores = [row.tournament_winner_score for row in tournaments if row.tournament_winner_score is not None]
+
+        today = datetime.now(timezone.utc).date()
+        history = []
+        for offset in range(6, -1, -1):
+            day = today.fromordinal(today.toordinal() - offset)
+            history.append({
+                "day": day.strftime("%a"),
+                "date": day.isoformat(),
+                "requests": sum(1 for row in logs if row.created_at.date() == day),
+            })
+
+        threshold = settings.cache_similarity_threshold
+        similarities = [row.similarity for row in chat]
+        similarity_distribution = [
+            {"range": "0.95-1.00", "count": sum(value >= 0.95 for value in similarities)},
+            {"range": "0.90-0.95", "count": sum(0.90 <= value < 0.95 for value in similarities)},
+            {"range": f"{threshold:.2f}-0.90", "count": sum(threshold <= value < 0.90 for value in similarities)},
+            {"range": f"<{threshold:.2f}", "count": sum(value < threshold for value in similarities)},
+        ]
+        avg_latency = sum(row.latency_ms for row in logs) / len(logs) if logs else None
+        active_entries = int(await db.scalar(select(func.count(SemanticCacheEntry.id))) or 0)
         return {
-            "total_requests": total,
+            "total_requests": len(logs),
             "cache_hits": hits,
-            "cache_hit_rate": round(hits / total * 100, 2) if total else 0.0,
-            "rate_limited_requests": rate_limited,
-            "avg_latency_ms": round(float(avg_latency), 2) if avg_latency else None,
-            "compressed_tokens_saved": saved,
+            "cache_misses": misses,
+            "cache_hit_rate": round(hits / len(chat) * 100, 2) if chat else 0.0,
+            "active_cache_entries": active_entries,
+            "llm_calls": sum(row.llm_call_count for row in logs),
+            "llm_calls_avoided": hits,
+            "rate_limited_requests": sum(1 for row in logs if row.rate_limited),
+            "avg_latency_ms": round(avg_latency, 2) if avg_latency is not None else None,
+            "total_input_tokens": sum(row.input_tokens or 0 for row in logs),
+            "total_output_tokens": sum(row.output_tokens or 0 for row in logs),
+            "total_tokens": sum(row.total_tokens or 0 for row in logs),
+            "compressed_tokens_saved": tokens_saved,
+            "compression": {
+                "original_tokens": total_original,
+                "compressed_tokens": total_compressed,
+                "tokens_saved": tokens_saved,
+                "reduction_percent": round(tokens_saved / total_original * 100, 2) if total_original else 0.0,
+            },
+            "tournaments": {
+                "count": len(tournaments),
+                "average_candidates": round(sum(candidate_counts) / len(candidate_counts), 2) if candidate_counts else 0.0,
+                "average_winning_score": round(sum(winner_scores) / len(winner_scores), 3) if winner_scores else 0.0,
+                "judge_fallback_rate": round(sum(row.judge_fallback for row in tournaments) / len(tournaments) * 100, 2) if tournaments else 0.0,
+            },
+            "history": history,
+            "recent_activity": [
+                {
+                    "id": row.request_id,
+                    "time": row.created_at.isoformat(),
+                    "result": "HIT" if row.cache_hit else "MISS",
+                    "similarity": row.similarity,
+                    "latency_ms": round(row.latency_ms, 2),
+                }
+                for row in chat[:20]
+            ],
+            "similarity_distribution": similarity_distribution,
         }
 
     return app

@@ -11,7 +11,7 @@ from providers.base import LLMProvider, ProviderResult, ProviderUsage
 class GeminiProvider(LLMProvider):
     def __init__(self, model_name: str | None = None):
         self.name = "gemini"
-        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
     def is_available(self) -> bool:
         return bool(os.getenv("GEMINI_API_KEY", "").strip())

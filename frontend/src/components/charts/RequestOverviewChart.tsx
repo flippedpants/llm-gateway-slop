@@ -64,7 +64,7 @@ export const RequestOverviewChart: React.FC<RequestOverviewChartProps> = ({ data
             tickLine={false}
             axisLine={false}
             tick={{ fill: '#64748b', fontSize: 12 }}
-            domain={[100, 350]}
+            domain={[0, 'auto']}
           />
           <Tooltip content={<CustomTooltip />} />
           <Area

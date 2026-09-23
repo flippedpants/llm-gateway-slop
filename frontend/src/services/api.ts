@@ -1,87 +1,40 @@
 import { ApiError } from '../types/gateway';
 
-/**
- * Base URL determination:
- * In development, we use relative URL '/api' which Vite proxies to http://127.0.0.1:8000
- * In production or custom setup, VITE_API_BASE_URL can override it.
- */
-const getBaseUrl = (): string => {
-  const envUrl = import.meta.env.VITE_API_BASE_URL;
-  if (envUrl && typeof window !== 'undefined' && window.location.origin.includes('localhost:5173')) {
-    // In local Vite dev server, use the proxy route to prevent CORS errors with backend
-    return '/api';
-  }
-  return envUrl || '/api';
+export const API_BASE_URL = '/api';
+export type AuthScope = 'none' | 'gateway' | 'admin';
+
+export const getGatewayApiKey = (): string | null => localStorage.getItem('gateway_api_key');
+export const getAdminApiKey = (): string | null => sessionStorage.getItem('admin_api_key');
+export const setAdminApiKey = (value: string): void => {
+  if (value.trim()) sessionStorage.setItem('admin_api_key', value.trim());
+  else sessionStorage.removeItem('admin_api_key');
 };
 
-export const API_BASE_URL = getBaseUrl();
-
-export const getGatewayApiKey = (): string | null => {
-  if (typeof window !== 'undefined') {
-    const stored = localStorage.getItem('gateway_api_key');
-    if (stored) return stored;
+export async function apiRequest<T>(endpoint: string, options: RequestInit = {}, auth: AuthScope = 'gateway'): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (auth === 'gateway') {
+    const key = getGatewayApiKey();
+    if (key) headers['X-Gateway-API-Key'] = key;
+  } else if (auth === 'admin') {
+    const key = getAdminApiKey();
+    if (!key) throw { detail: 'Enter the admin key in Settings to unlock live telemetry.', status: 401 } as ApiError;
+    headers['X-Admin-Key'] = key;
   }
-  return import.meta.env.VITE_GATEWAY_API_KEY || null;
-};
-
-export async function apiRequest<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
-
-  const defaultHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  const apiKey = getGatewayApiKey();
-  if (apiKey) {
-    defaultHeaders['X-Gateway-API-Key'] = apiKey;
-  }
-
   try {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...defaultHeaders,
-        ...options.headers,
-      },
-    });
-
+    const response = await fetch(API_BASE_URL + (endpoint.startsWith('/') ? endpoint : '/' + endpoint), { ...options, headers: { ...headers, ...options.headers } });
     if (!response.ok) {
-      let errorMessage = `Request failed with status ${response.status}`;
+      let detail = 'Request failed with status ' + response.status;
       try {
-        const errorData = await response.json();
-        if (errorData.detail) {
-          errorMessage = typeof errorData.detail === 'string' 
-            ? errorData.detail 
-            : JSON.stringify(errorData.detail);
-        }
-      } catch {
-        // Fallback to response status text
-        if (response.statusText) {
-          errorMessage = response.statusText;
-        }
-      }
-
-      const error: ApiError = {
-        detail: errorMessage,
-        status: response.status,
-      };
-      throw error;
+        const body = await response.json();
+        detail = body?.error?.message ?? (typeof body?.detail === 'string' ? body.detail : detail);
+      } catch { if (response.statusText) detail = response.statusText; }
+      if (response.status === 429 && response.headers.get('Retry-After')) detail += ' Retry after ' + response.headers.get('Retry-After') + ' seconds.';
+      throw { detail, status: response.status, retryAfter: Number(response.headers.get('Retry-After')) || undefined, requestId: response.headers.get('X-Request-ID') || undefined } as ApiError;
     }
-
-    return (await response.json()) as T;
-  } catch (err: unknown) {
-    if ((err as ApiError).status !== undefined) {
-      throw err;
-    }
-
-    // Network error or unreachable backend
-    const networkError: ApiError = {
-      detail: 'Unable to reach the Gateway. Check that FastAPI is running on the configured endpoint.',
-      status: 0,
-    };
-    throw networkError;
+    if (response.status === 204) return undefined as T;
+    return await response.json() as T;
+  } catch (error) {
+    if ((error as ApiError).status !== undefined) throw error;
+    throw { detail: 'Unable to reach the Gateway. Check that FastAPI is running on port 8000.', status: 0 } as ApiError;
   }
 }

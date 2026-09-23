@@ -21,9 +21,10 @@ export const PlaygroundPage: React.FC = () => {
 
   const [apiKey, setApiKey] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('gateway_api_key') || 'gateway-secret-key';
+      const stored = localStorage.getItem('gateway_api_key');
+      return stored === 'gateway-secret-key' ? '' : stored || '';
     }
-    return 'gateway-secret-key';
+    return '';
   });
   const [prompt, setPrompt] = useState(
     'Explain quantum computing in simple terms for a first-year computer science student.'
@@ -80,7 +81,7 @@ export const PlaygroundPage: React.FC = () => {
           <div className="flex items-center gap-2.5">
             <Network className="w-4 h-4 text-blue-600 shrink-0" />
             <span>
-              <strong>One Unified API:</strong> You call <code className="bg-white/80 px-1.5 py-0.5 rounded font-mono text-[11px] text-blue-800 border border-blue-200">POST /v1/chat/completions</code>. The Gateway manages routing, caching, and model execution on your behalf.
+              <strong>Gateway APIs:</strong> Standard requests use <code className="bg-white/80 px-1.5 py-0.5 rounded font-mono text-[11px] text-blue-800 border border-blue-200">POST /v1/chat/completions</code>; tournament mode uses <code className="bg-white/80 px-1.5 py-0.5 rounded font-mono text-[11px] text-blue-800 border border-blue-200">POST /v1/tournaments</code>.
             </span>
           </div>
           <span className="hidden md:inline-block font-mono text-[10px] text-blue-700 font-semibold bg-white/70 px-2 py-0.5 rounded border border-blue-200">
@@ -155,7 +156,7 @@ export const PlaygroundPage: React.FC = () => {
         <ResponseViewer result={result} isLoading={isLoading} />
 
         {/* Gateway Intelligence Preview (Demonstrating intended optimizations) */}
-        <IntelligencePreview />
+        <IntelligencePreview result={result} />
       </div>
     </div>
   );
