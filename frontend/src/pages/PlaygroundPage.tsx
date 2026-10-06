@@ -77,14 +77,14 @@ export const PlaygroundPage: React.FC = () => {
 
       <div className="px-4 sm:px-8 max-w-6xl mx-auto space-y-6">
         {/* Architecture Reminder Banner */}
-        <div className="rounded-lg bg-blue-50/60 border border-blue-200/80 p-3.5 flex items-center justify-between gap-4 text-xs text-blue-900">
+        <div className="rounded-lg bg-accent-50/60 border border-accent-200/80 p-3.5 flex items-center justify-between gap-4 text-xs text-accent-900">
           <div className="flex items-center gap-2.5">
-            <Network className="w-4 h-4 text-blue-600 shrink-0" />
+            <Network className="w-4 h-4 text-accent-600 shrink-0" />
             <span>
-              <strong>Gateway APIs:</strong> Standard requests use <code className="bg-white/80 px-1.5 py-0.5 rounded font-mono text-[11px] text-blue-800 border border-blue-200">POST /v1/chat/completions</code>; tournament mode uses <code className="bg-white/80 px-1.5 py-0.5 rounded font-mono text-[11px] text-blue-800 border border-blue-200">POST /v1/tournaments</code>.
+              <strong>Gateway APIs:</strong> Standard requests use <code className="bg-surface/80 px-1.5 py-0.5 rounded font-mono text-[11px] text-accent-800 border border-accent-200">POST /v1/chat/completions</code>; tournament mode uses <code className="bg-surface/80 px-1.5 py-0.5 rounded font-mono text-[11px] text-accent-800 border border-accent-200">POST /v1/tournaments</code>.
             </span>
           </div>
-          <span className="hidden md:inline-block font-mono text-[10px] text-blue-700 font-semibold bg-white/70 px-2 py-0.5 rounded border border-blue-200">
+          <span className="hidden md:inline-block shrink-0 font-mono text-[10px] text-accent-700 font-semibold bg-surface/70 px-2 py-0.5 rounded border border-accent-200">
             HTTP POST
           </span>
         </div>
@@ -93,8 +93,8 @@ export const PlaygroundPage: React.FC = () => {
         <Card
           title={
             <div className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-blue-600" />
-              <span className="text-sm font-semibold text-slate-900">Request Console</span>
+              <Terminal className="w-4 h-4 text-accent-600" />
+              <span className="text-sm font-semibold text-earth-900">Request Console</span>
             </div>
           }
           subtitle="Configure your Gateway key and prompt payload"
@@ -106,7 +106,7 @@ export const PlaygroundPage: React.FC = () => {
               disabled={isLoading}
             />
 
-            <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-md text-xs">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 bg-earth-50 border border-earth-200 rounded-md text-xs">
               <div className="flex items-center gap-2">
                 <input
                   id="tournament-mode-toggle"
@@ -114,13 +114,13 @@ export const PlaygroundPage: React.FC = () => {
                   checked={tournament}
                   onChange={(e) => setTournament(e.target.checked)}
                   disabled={isLoading}
-                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20"
+                  className="rounded border-earth-300 text-accent-600 focus:ring-accent-500/20"
                 />
-                <label htmlFor="tournament-mode-toggle" className="font-semibold text-slate-800 cursor-pointer">
+                <label htmlFor="tournament-mode-toggle" className="font-semibold text-earth-800 cursor-pointer">
                   Enable Multi-Model Tournament Mode
                 </label>
               </div>
-              <span className="text-[11px] text-slate-500">
+              <span className="text-[11px] text-earth-500">
                 Runs candidates in parallel & selects best response with LLM Judge
               </span>
             </div>

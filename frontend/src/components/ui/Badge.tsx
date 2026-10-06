@@ -25,21 +25,21 @@ export const Badge: React.FC<BadgeProps> = ({
       defaultLabel: 'LIVE',
     },
     demo: {
-      bg: 'bg-amber-500/10',
-      text: 'text-amber-700',
-      border: 'border-amber-500/30',
+      bg: 'bg-ochre-500/10',
+      text: 'text-ochre-700',
+      border: 'border-ochre-500/30',
       defaultLabel: 'DEMO',
     },
     preview: {
-      bg: 'bg-sky-500/10',
-      text: 'text-sky-700',
-      border: 'border-sky-500/30',
+      bg: 'bg-accent-500/10',
+      text: 'text-accent-700',
+      border: 'border-accent-500/30',
       defaultLabel: 'PREVIEW',
     },
     planned: {
-      bg: 'bg-purple-500/10',
-      text: 'text-purple-700',
-      border: 'border-purple-500/30',
+      bg: 'bg-clay-500/10',
+      text: 'text-clay-700',
+      border: 'border-clay-500/30',
       defaultLabel: 'PLANNED / DEMO',
     },
     hit: {
@@ -49,15 +49,15 @@ export const Badge: React.FC<BadgeProps> = ({
       defaultLabel: 'HIT',
     },
     miss: {
-      bg: 'bg-slate-100 text-slate-600',
-      text: 'text-slate-600',
-      border: 'border-slate-200',
+      bg: 'bg-earth-100 text-earth-600',
+      text: 'text-earth-600',
+      border: 'border-earth-200',
       defaultLabel: 'MISS',
     },
     neutral: {
-      bg: 'bg-slate-100 text-slate-700',
-      text: 'text-slate-700',
-      border: 'border-slate-200',
+      bg: 'bg-earth-100 text-earth-700',
+      text: 'text-earth-700',
+      border: 'border-earth-200',
       defaultLabel: '',
     },
     success: {
@@ -72,7 +72,7 @@ export const Badge: React.FC<BadgeProps> = ({
 
   return (
     <span
-      className={`inline-flex items-center gap-1 uppercase rounded border ${style.bg} ${style.text} ${style.border} ${sizeClasses} ${className}`}
+      className={`inline-flex w-fit items-center gap-1 uppercase rounded border ${style.bg} ${style.text} ${style.border} ${sizeClasses} ${className}`}
     >
       {variant === 'live' && (
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />

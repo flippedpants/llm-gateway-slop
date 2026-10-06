@@ -3,7 +3,7 @@
 This guide sets up the complete local LLM Gateway: PostgreSQL with pgvector, Redis, FastAPI, local embeddings and models, and the React/Vite portal.
 
 ## 1. Prerequisites
-
+`
 Install:
 
 - Docker Engine or Docker Desktop
