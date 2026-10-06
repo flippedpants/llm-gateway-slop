@@ -8,6 +8,7 @@ const snapshot: BackendUsageResponse = {
   active_cache_entries: 4, llm_calls: 9, llm_calls_avoided: 3,
   rate_limited_requests: 2, avg_latency_ms: 250, total_input_tokens: 100,
   total_output_tokens: 50, total_tokens: 150, compressed_tokens_saved: 20,
+  costs: { currency: 'USD', baseline_spend_usd: 0.002, actual_spend_usd: 0.001, net_savings_usd: 0.001, cache_savings_usd: 0.0008, compression_savings_usd: 0.0002, tournament_overhead_usd: 0, priced_requests: 4, unpriced_requests: 2, configured_models: 2 },
   compression: { original_tokens: 120, compressed_tokens: 100, tokens_saved: 20, reduction_percent: 16.67 },
   tournaments: { count: 2, average_candidates: 3, average_winning_score: 0.8, judge_fallback_rate: 0 },
   history: [], recent_activity: [], similarity_distribution: [],

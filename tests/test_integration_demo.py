@@ -52,3 +52,5 @@ def test_live_admin_portal_contracts():
     assert len(body["history"]) == 7
     assert "compression" in body
     assert "tournaments" in body
+    assert "costs" in body
+    assert body["costs"]["currency"] == "USD"

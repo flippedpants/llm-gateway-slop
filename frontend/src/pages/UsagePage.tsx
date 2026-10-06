@@ -10,6 +10,10 @@ import { TokenUsageComparisonChart } from '../components/charts/TokenUsageCompar
 import { ApiError, BackendUsageResponse } from '../types/gateway';
 import { getUsageSnapshot, mapCompression, mapTournament, mapUsage } from '../services/metrics';
 
+const formatUsd = (value: number): string => new Intl.NumberFormat('en-US', {
+  style: 'currency', currency: 'USD', minimumFractionDigits: 4, maximumFractionDigits: 8,
+}).format(value);
+
 export const UsagePage: React.FC = () => {
   const { setIsMobileOpen, gatewayOnline } = useOutletContext<any>();
   const [data, setData] = useState<BackendUsageResponse | null>(null);
@@ -19,6 +23,8 @@ export const UsagePage: React.FC = () => {
   const compression = data ? mapCompression(data) : null;
   const tournament = data ? mapTournament(data) : null;
   const withoutCompression = usage ? usage.totalTokens + usage.tokensSaved : 0;
+  const costs = data?.costs;
+  const hasPricedRequests = Boolean(costs?.priced_requests);
   return <div className="space-y-6">
     <PageHeader title="Usage & Efficiency" description="Measured request, token, compression, and tournament behavior." onOpenMobileSidebar={() => setIsMobileOpen(true)} gatewayOnline={gatewayOnline} />
     <div className="px-4 sm:px-8 max-w-7xl mx-auto space-y-6">
@@ -30,6 +36,17 @@ export const UsagePage: React.FC = () => {
           <MetricCard label="Tokens Saved" value={usage ? usage.tokensSaved.toLocaleString() : '...'} sublabel="Prompt compression" badgeVariant="live" badgeText="Live" />
           <MetricCard label="Rate Limited" value={usage ? usage.rateLimitedRequests.toLocaleString() : '...'} sublabel="HTTP 429 responses" badgeVariant="live" badgeText="Live" />
         </div>
+        <Card title="Estimated USD Savings" subtitle="Compared with one direct, uncompressed call to the response model" headerAction={<Badge variant="live">Configured rates</Badge>}>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded"><p className="text-xs text-emerald-700">Net saved</p><strong className={'text-xl font-mono ' + ((costs?.net_savings_usd ?? 0) < 0 ? 'text-rose-700' : 'text-emerald-700')}>{hasPricedRequests ? formatUsd(costs!.net_savings_usd) : '—'}</strong></div>
+            <div className="p-4 bg-slate-50 rounded border"><p className="text-xs text-slate-500">Direct baseline</p><strong className="text-xl font-mono">{hasPricedRequests ? formatUsd(costs!.baseline_spend_usd) : '—'}</strong></div>
+            <div className="p-4 bg-slate-50 rounded border"><p className="text-xs text-slate-500">Estimated actual</p><strong className="text-xl font-mono">{hasPricedRequests ? formatUsd(costs!.actual_spend_usd) : '—'}</strong></div>
+            <div className="p-4 bg-slate-50 rounded border"><p className="text-xs text-slate-500">Cache saved</p><strong className="text-lg font-mono">{hasPricedRequests ? formatUsd(costs!.cache_savings_usd) : '—'}</strong></div>
+            <div className="p-4 bg-slate-50 rounded border"><p className="text-xs text-slate-500">Compression saved</p><strong className="text-lg font-mono">{hasPricedRequests ? formatUsd(costs!.compression_savings_usd) : '—'}</strong></div>
+            <div className="p-4 bg-slate-50 rounded border"><p className="text-xs text-slate-500">Tournament overhead</p><strong className="text-lg font-mono">{hasPricedRequests ? formatUsd(costs!.tournament_overhead_usd) : '—'}</strong></div>
+          </div>
+          <p className="mt-3 text-xs text-slate-600">{costs?.configured_models === 0 ? 'Rates not configured. Set MODEL_PRICING_JSON to calculate estimates.' : `${costs?.priced_requests ?? 0} priced requests; ${costs?.unpriced_requests ?? 0} unpriced requests. Historical requests without rates are not backfilled.`}</p>
+        </Card>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card title="Token Efficiency" subtitle="Recorded tokens with and without compression" headerAction={<Badge variant="live">Live Data</Badge>}><TokenUsageComparisonChart withoutGateway={withoutCompression} withGateway={usage?.totalTokens ?? 0} /></Card>
           <Card title="Token Totals" subtitle="Provider-reported and locally counted usage">
@@ -49,7 +66,7 @@ export const UsagePage: React.FC = () => {
             <div className="grid grid-cols-2 gap-3 text-sm"><div>Tournaments<br/><strong className="text-xl">{tournament?.tournamentsCount}</strong></div><div>Average candidates<br/><strong className="text-xl">{tournament?.averageCandidates}</strong></div><div>Winning score<br/><strong className="text-xl text-purple-600">{tournament?.averageWinningScore}</strong></div><div>Judge fallback rate<br/><strong className="text-xl text-amber-600">{tournament?.judgeFallbackRate}%</strong></div></div>
           </Card>
         </div>
-        <Card title={<span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" />Metric interpretation</span>} subtitle="No fictional pricing assumptions"><p className="text-sm text-slate-600">Efficiency is reported from request logs, token counts, cache decisions, and judge traces. The local deterministic provider has no monetary price, so this page intentionally does not estimate dollar savings.</p></Card>
+        <Card title={<span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" />Metric interpretation</span>} subtitle="Rate-based estimates"><p className="text-sm text-slate-600">USD values use your configured model rates and provider token counts when available. Local fake calls are unpriced. Tournament overhead includes extra candidate and judge calls, so net savings can be negative. These estimates may differ from provider invoices.</p></Card>
       </>}
     </div>
   </div>;

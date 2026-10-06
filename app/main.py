@@ -47,6 +47,7 @@ from services.api_key_service import (
     create_gateway_api_key,
     seed_gateway_api_key,
 )
+from services.cost_estimator import CostEstimator
 from services.embeddings import FastEmbedEmbedder
 from services.prompt_compressor import CompressionStats, PromptCompressor
 from services.provider_registry import build_provider_registry
@@ -162,6 +163,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings.compression_target_ratio,
         )
         app.state.cache = PgVectorSemanticCache(settings.cache_similarity_threshold)
+        app.state.cost_estimator = CostEstimator(settings.model_pricing_json)
         app.state.router = ModelRouter(
             {
                 name: providers[name]
@@ -173,6 +175,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             providers,
             settings.tournament_provider_names,
             settings.judge_provider,
+            embedder.count_tokens,
         )
         logger.info(
             "gateway_started",
@@ -293,7 +296,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield f"data: {json.dumps(chunk)}\n\n"
 
                     text = "".join(parts)
-                    completion_tokens = app.state.embedder.count_tokens(text)
+                    completion_tokens = lookup.entry.completion_tokens if lookup.hit and lookup.entry else app.state.embedder.count_tokens(text)
                     latency_ms = (time.perf_counter() - started) * 1000
                     if not lookup.hit:
                         async with AsyncSessionLocal() as cache_db:
@@ -340,7 +343,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield "data: [DONE]\n\n"
                 finally:
                     text = "".join(parts)
-                    completion_tokens = app.state.embedder.count_tokens(text)
+                    completion_tokens = lookup.entry.completion_tokens if lookup.hit and lookup.entry and status_code == 200 else app.state.embedder.count_tokens(text)
                     latency_ms = (time.perf_counter() - started) * 1000
                     values = {
                         "request_id": request_id,
@@ -362,6 +365,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "total_tokens": prompt_tokens + completion_tokens,
                         "error_code": error_code,
                     }
+                    if status_code == 200:
+                        values.update(app.state.cost_estimator.chat(
+                            provider=provider, model=model, prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            compression_tokens_saved=0 if lookup.hit else stats.tokens_saved,
+                            cache_hit=lookup.hit,
+                        ).log_values())
                     emit_request_log(**values)
                     await persist_request_log(**values)
 
@@ -376,7 +386,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             provider = lookup.entry.provider
             model = lookup.entry.model
             prompt_tokens = stats.original_tokens
-            completion_tokens = app.state.embedder.count_tokens(text)
+            completion_tokens = lookup.entry.completion_tokens
             llm_called = False
             compression = None
         else:
@@ -427,6 +437,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "output_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
         }
+        values.update(app.state.cost_estimator.chat(
+            provider=provider, model=model, prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            compression_tokens_saved=0 if lookup.hit else stats.tokens_saved,
+            cache_hit=lookup.hit,
+        ).log_values())
         emit_request_log(**values)
         await persist_request_log(**values)
         return _chat_response(
@@ -463,6 +479,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 compressed,
                 temperature=payload.temperature,
                 max_tokens=payload.max_tokens,
+                original_messages=[message.model_dump() for message in payload.messages],
             )
         except RuntimeError as exc:
             raise HTTPException(502, str(exc)) from exc
@@ -480,6 +497,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     else None
                 ),
                 error=item.error,
+                attempts=item.attempts,
             )
             for item in outcome.candidates
         ]
@@ -493,7 +511,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "provider": outcome.judge_provider,
             "model": outcome.judge_model,
             "llm_called": True,
-            "llm_call_count": len(outcome.candidates) + 1,
+            "llm_call_count": sum(item.attempts for item in outcome.candidates) + outcome.judge_attempts,
             "tournament": True,
             "tournament_candidate_count": len(outcome.candidates),
             "tournament_winner_score": outcome.scores.get(outcome.winner_id),
@@ -504,6 +522,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "output_tokens": outcome.usage.completion_tokens,
             "total_tokens": outcome.usage.total_tokens,
         }
+        winner = next(item.result for item in outcome.candidates if item.candidate_id == outcome.winner_id)
+        values.update(app.state.cost_estimator.tournament(
+            winner=winner, charged_results=outcome.charged_results,
+            compression_tokens_saved=stats.tokens_saved,
+        ).log_values())
         emit_request_log(**values)
         await persist_request_log(**values)
         return TournamentResponse(
@@ -636,6 +659,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ]
         avg_latency = sum(row.latency_ms for row in logs) / len(logs) if logs else None
         active_entries = int(await db.scalar(select(func.count(SemanticCacheEntry.id))) or 0)
+        # Financial totals cover every persisted request, unlike the bounded activity feed.
+        priced = (await db.execute(
+            select(
+                func.count(RequestLog.id),
+                func.coalesce(func.sum(RequestLog.baseline_cost_usd), 0),
+                func.coalesce(func.sum(RequestLog.actual_cost_usd), 0),
+                func.coalesce(func.sum(RequestLog.net_savings_usd), 0),
+                func.coalesce(func.sum(RequestLog.cache_savings_usd), 0),
+                func.coalesce(func.sum(RequestLog.compression_savings_usd), 0),
+                func.coalesce(func.sum(RequestLog.tournament_overhead_usd), 0),
+            ).where(
+                RequestLog.path.in_(("/v1/chat/completions", "/v1/tournaments")),
+                RequestLog.status_code == 200,
+                RequestLog.pricing_status == "priced",
+            )
+        )).one()
+        unpriced_count = int(await db.scalar(
+            select(func.count(RequestLog.id)).where(
+                RequestLog.path.in_(("/v1/chat/completions", "/v1/tournaments")),
+                RequestLog.status_code == 200,
+                RequestLog.pricing_status != "priced",
+            )
+        ) or 0)
         return {
             "total_requests": len(logs),
             "cache_hits": hits,
@@ -650,6 +696,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "total_output_tokens": sum(row.output_tokens or 0 for row in logs),
             "total_tokens": sum(row.total_tokens or 0 for row in logs),
             "compressed_tokens_saved": tokens_saved,
+            "costs": {
+                "currency": "USD",
+                "baseline_spend_usd": float(priced[1]),
+                "actual_spend_usd": float(priced[2]),
+                "net_savings_usd": float(priced[3]),
+                "cache_savings_usd": float(priced[4]),
+                "compression_savings_usd": float(priced[5]),
+                "tournament_overhead_usd": float(priced[6]),
+                "priced_requests": priced[0],
+                "unpriced_requests": unpriced_count,
+                "configured_models": len(app.state.cost_estimator.prices),
+            },
             "compression": {
                 "original_tokens": total_original,
                 "compressed_tokens": total_compressed,

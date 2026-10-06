@@ -81,6 +81,7 @@ class CandidateTrace(BaseModel):
     model: str
     response: str | None = None
     latency_ms: float
+    attempts: int = 1
     usage: TokenUsage | None = None
     error: str | None = None
 

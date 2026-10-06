@@ -25,8 +25,9 @@ class Settings(BaseSettings):
     enabled_providers: str = "local"
     compression_min_tokens: int = 30
     compression_target_ratio: float = 0.70
-    tournament_providers: str = "local-concise,local-analytical,local-practical"
-    judge_provider: str = "local-judge"
+    tournament_providers: str = "auto"
+    judge_provider: str = "auto"
+    model_pricing_json: str = "{}"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.6-flash"
     groq_api_key: str = ""

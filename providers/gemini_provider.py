@@ -46,7 +46,8 @@ class GeminiProvider(LLMProvider):
         metadata = getattr(response, "usage_metadata", None)
         usage = ProviderUsage(
             getattr(metadata, "prompt_token_count", 0) or 0,
-            getattr(metadata, "candidates_token_count", 0) or 0,
+            (getattr(metadata, "candidates_token_count", 0) or 0)
+            + (getattr(metadata, "thoughts_token_count", 0) or 0),
         )
         return ProviderResult(
             text=response.text or "",

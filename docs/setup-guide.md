@@ -48,8 +48,9 @@ EMBEDDING_MODEL_PATH=
 LOCAL_TOKEN_DELAY_MS=35
 ENABLED_PROVIDERS=local
 
-TOURNAMENT_PROVIDERS=local-concise,local-analytical,local-practical
-JUDGE_PROVIDER=local-judge
+TOURNAMENT_PROVIDERS=auto
+JUDGE_PROVIDER=auto
+MODEL_PRICING_JSON={}
 
 GEMINI_API_KEY=
 GROQ_API_KEY=
@@ -310,51 +311,29 @@ After changing runtime settings, recreate the gateway:
 docker compose up -d --force-recreate gateway
 ```
 
-## 9. Provider configuration
+## 9. Cloud providers, tournaments, and USD estimates
 
-The offline default is:
-
-```dotenv
-ENABLED_PROVIDERS=local
-TOURNAMENT_PROVIDERS=local-concise,local-analytical,local-practical
-JUDGE_PROVIDER=local-judge
-```
-
-Registered provider names are:
-
-- `local`
-- `gemini`
-- `groq`
-- `cerebras`
-- `local-concise`
-- `local-analytical`
-- `local-practical`
-- `local-judge`
-
-Docker Compose registers `gemini,groq,cerebras,local` automatically. Each cloud adapter checks only whether its matching API key is non-empty; adapters without a key disable themselves, and `local` remains the final fallback. You do not need to set `ENABLED_PROVIDERS` when running with Docker Compose.
-
-`ENABLED_PROVIDERS` remains useful only when starting Python directly on the host. Expose other optional settings in Compose when you need to override their defaults:
-
-```yaml
-TOURNAMENT_PROVIDERS: ${TOURNAMENT_PROVIDERS:-local-concise,local-analytical,local-practical}
-JUDGE_PROVIDER: ${JUDGE_PROVIDER:-local-judge}
-DEFAULT_RATE_CAPACITY: ${DEFAULT_RATE_CAPACITY:-60}
-DEFAULT_RATE_REFILL_PER_SECOND: ${DEFAULT_RATE_REFILL_PER_SECOND:-1.0}
-COMPRESSION_MIN_TOKENS: ${COMPRESSION_MIN_TOKENS:-30}
-COMPRESSION_TARGET_RATIO: ${COMPRESSION_TARGET_RATIO:-0.70}
-GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
-GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
-CEREBRAS_MODEL: ${CEREBRAS_MODEL:-qwen-3.8-27b}
-```
-
-Example Groq configuration:
+Put the cloud API keys you have in `.env`:
 
 ```dotenv
+GEMINI_API_KEY=your-gemini-key
 GROQ_API_KEY=your-groq-key
-GROQ_MODEL=openai/gpt-oss-20b
+CEREBRAS_API_KEY=your-cerebras-key
 ```
 
-Keeping `local` enabled provides an offline fallback. Rebuild or recreate the gateway after provider changes:
+Docker Compose registers these three adapters and `local` for ordinary chat routing. An empty key disables its cloud adapter. Tournament mode selects up to three cloud providers with keys, sends candidates in parallel, and uses a separate cloud judge call. It requires **two successful cloud candidates**. A provider with no credit or an invalid model is shown as a failed candidate when the other two succeed; otherwise the endpoint returns an actionable 502. Local fake candidates and local judges are never used in tournament mode.
+
+For host Python runs, set `ENABLED_PROVIDERS=gemini,groq,cerebras,local`. Tournament defaults to `TOURNAMENT_PROVIDERS=auto` and `JUDGE_PROVIDER=auto`. If an older `.env` explicitly sets `local-analytical` or `local-judge`, change those values to `auto`. Optional cloud-only overrides can name providers, for example `TOURNAMENT_PROVIDERS=gemini,groq` and `JUDGE_PROVIDER=gemini`.
+
+USD estimates require rates you supply. Add a single-line JSON value to `.env`, keyed by the exact `provider/model` reported by the gateway:
+
+```dotenv
+MODEL_PRICING_JSON='{"gemini/gemini-3.6-flash":{"input_per_million_usd":<input-rate>,"output_per_million_usd":<output-rate>},"groq/openai/gpt-oss-20b":{"input_per_million_usd":<input-rate>,"output_per_million_usd":<output-rate>}}'
+```
+
+Replace each `<...-rate>` with your provider's current USD rate per million tokens; the example is a template, not valid JSON until you replace the placeholders. Include each model you use, including the judge model. Missing model rates leave that request unpriced. The **Usage & Efficiency** tab shows only fully priced requests in dollar totals, plus an unpriced-request count. Previously logged requests remain unpriced. Cache savings, compression savings, and tournament overhead reconcile to net savings relative to one direct, uncompressed call. For Gemini, reported thinking tokens count as output tokens in the estimate ([Gemini token guide](https://ai.google.dev/gemini-api/docs/generate-content/thinking#pricing)). Failed calls may be billed by a provider without returning usage, so these figures are estimates rather than invoices.
+
+After editing `.env`, rebuild or recreate the gateway:
 
 ```bash
 docker compose up --build -d gateway
